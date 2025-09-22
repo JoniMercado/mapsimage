@@ -47,7 +47,7 @@
 
 <script>
   // Reemplazá por tu key de MapTiler
-  const MAPTILER_KEY = "YOUR_MAPTILER_KEY_HERE";
+  const MAPTILER_KEY = XlUzB32whUO2ed7bHx3a;
 
   const $ = (id) => document.getElementById(id);
   const ui = {
