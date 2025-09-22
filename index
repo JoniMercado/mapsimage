@@ -2,214 +2,146 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>Descargar mapa en alta resolución desde link de Google Maps</title>
+  <title>Descargar imagen de mapa en alta</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:#0b0c10; color:#e6e6e6; }
-    .ui { padding: 16px; display: grid; gap: 8px; grid-template-columns: 1fr 120px 120px 160px 140px 140px; align-items: center; }
-    .ui input, .ui select, .ui button { padding: 10px; border-radius: 10px; border: 1px solid #333; background:#15171c; color:#e6e6e6; }
-    .ui button { cursor: pointer; border: 1px solid #3a87ff; }
-    #status { grid-column: 1 / -1; opacity:.8; }
-    #viewer { width: 100vw; height: calc(100vh - 120px); display:block; }
-    .note { font-size: 12px; opacity:.75 }
-    @media (max-width: 980px) {
-      .ui { grid-template-columns: 1fr 1fr; }
-    }
+    :root { color-scheme: light dark; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    .wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    .grid { display:grid; gap:8px; grid-template-columns: 1fr 120px 120px 180px 120px 140px; align-items:center; }
+    input,select,button{ padding:10px; border-radius:10px; border:1px solid #3333; }
+    button{ cursor:pointer; border:1px solid #3a87ff; }
+    #msg{ grid-column:1 / -1; opacity:.8; }
+    #preview{ margin-top:16px; max-width:100%; border:1px solid #0002; border-radius:10px; display:none; }
+    @media (max-width: 980px){ .grid{ grid-template-columns: 1fr 1fr } }
+    .note{ font-size:12px; opacity:.75; }
   </style>
 </head>
 <body>
-  <div class="ui">
-    <input id="gmapsUrl" type="text" placeholder="https://www.google.com/maps/@40.5781155,0.682114,183369m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI1MDkxNy4wIKXMDSoASAFQAw%3D%3D" />
-    <input id="widthPx" type="number" min="256" max="8192" step="1" value="2048" title="Ancho en píxeles" />
-    <input id="heightPx" type="number" min="256" max="8192" step="1" value="2048" title="Alto en píxeles" />
-    <select id="styleSel" title="Estilo de mapa">
-      <option value="satellite">satellite</option>
-      <option value="hybrid">hybrid</option>
-      <option value="streets">streets</option>
-      <option value="toner">toner</option>
-    </select>
-    <select id="densitySel" title="Densidad de píxel">
-      <option value="@2x">@2x (alta)</option>
-      <option value="">@1x</option>
-    </select>
-    <button id="goBtn">Obtener imagen</button>
-    <div id="status" class="note">Pega un link del tipo: https://www.google.com/maps/@-34.607, -58.381, 14z</div>
+  <div class="wrap">
+    <h1>Descargar imagen de mapa en alta</h1>
+    <p class="note">Pega un link de Google Maps que tenga @lat,lng,zoomz. Ejemplo: https://www.google.com/maps/@-34.6037,-58.3816,14z</p>
+
+    <div class="grid">
+      <input id="gmapsUrl" type="text" placeholder="Link de Google Maps" />
+      <input id="widthPx" type="number" min="256" max="8192" step="1" value="2048" title="Ancho px" />
+      <input id="heightPx" type="number" min="256" max="8192" step="1" value="2048" title="Alto px" />
+      <select id="styleSel" title="Estilo">
+        <option value="satellite">satellite</option>
+        <option value="hybrid">hybrid</option>
+        <option value="streets-v2" selected>streets-v2</option>
+        <option value="basic-v2">basic-v2</option>
+        <option value="outdoor-v2">outdoor-v2</option>
+        <option value="topo-v2">topo-v2</option>
+      </select>
+      <select id="densitySel" title="Densidad">
+        <option value="@2x" selected>@2x</option>
+        <option value="">@1x</option>
+      </select>
+      <button id="downloadBtn">Descargar PNG</button>
+      <div id="msg"></div>
+    </div>
+
+    <img id="preview" alt="previsualización del mapa" />
   </div>
 
-  <canvas id="viewer"></canvas>
+<script>
+  // Reemplazá por tu key de MapTiler
+  const MAPTILER_KEY = "YOUR_MAPTILER_KEY_HERE";
 
-  <!-- Three.js desde CDN -->
-  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  const $ = (id) => document.getElementById(id);
+  const ui = {
+    url: $("gmapsUrl"),
+    w: $("widthPx"),
+    h: $("heightPx"),
+    style: $("styleSel"),
+    density: $("densitySel"),
+    btn: $("downloadBtn"),
+    msg: $("msg"),
+    preview: $("preview"),
+  };
 
-  <script>
-    const MAPTILER_KEY = "XlUzB32whUO2ed7bHx3a"; // reemplaza con tu key
-    // MapTiler Static: https://api.maptiler.com/maps/{style}/static/{lon},{lat},{zoom}/{width}x{height}@2x.png?key=KEY
+  function setMsg(t){ ui.msg.textContent = t; }
 
-    const ui = {
-      url: document.getElementById("gmapsUrl"),
-      w: document.getElementById("widthPx"),
-      h: document.getElementById("heightPx"),
-      style: document.getElementById("styleSel"),
-      density: document.getElementById("densitySel"),
-      go: document.getElementById("goBtn"),
-      status: document.getElementById("status")
-    };
-
-    // Three.js setup
-    const canvas = document.getElementById("viewer");
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b0c10);
-    const camera = new THREE.PerspectiveCamera(45, 2, 0.1, 1000);
-    camera.position.set(0, 0, 3);
-    const light = new THREE.AmbientLight(0xffffff, 1.0);
-    scene.add(light);
-
-    let plane = null;
-
-    function fitRenderer() {
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
-      if (canvas.width !== w || canvas.height !== h) {
-        renderer.setSize(w, h, false);
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
+  // Lee lat, lng, zoom de un link común de Google Maps
+  function parseGoogleMapsUrl(url) {
+    try {
+      const u = new URL(url.trim());
+      const at = u.pathname.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*),(\d+\.?\d*)z/);
+      if (at) return { lat: +at[1], lng: +at[2], z: Math.round(+at[3]) };
+      const ll = u.searchParams.get("ll");
+      if (ll) {
+        const [lat,lng] = ll.split(",").map(Number);
+        const z = parseInt(u.searchParams.get("z") || "15", 10);
+        return { lat, lng, z };
       }
-    }
-
-    function animate() {
-      fitRenderer();
-      renderer.render(scene, camera);
-      requestAnimationFrame(animate);
-    }
-    animate();
-
-    function setStatus(msg) {
-      ui.status.textContent = msg;
-    }
-
-    // Parse de URL de Google Maps:
-    // Soporta: https://www.google.com/maps/@lat,lng,zoomz
-    // y links con "ll=lat,lng" o "q=lat,lng"
-    function parseGoogleMapsUrl(url) {
-      try {
-        const u = new URL(url.trim());
-        // 1) patrón @lat,lng,zoomz
-        const at = u.pathname.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*),(\d+\.?\d*)z/);
-        if (at) {
-          const lat = parseFloat(at[1]);
-          const lng = parseFloat(at[2]);
-          const zoom = parseFloat(at[3]);
-          return { lat, lng, zoom: Math.round(zoom) };
-        }
-        // 2) parámetros ll=lat,lng
-        const ll = u.searchParams.get("ll");
-        if (ll) {
-          const [lat, lng] = ll.split(",").map(Number);
-          const z = parseInt(u.searchParams.get("z") || "15", 10);
-          return { lat, lng, zoom: z };
-        }
-        // 3) q=lat,lng
-        const q = u.searchParams.get("q");
-        if (q && /^-?\d+\.?\d*,-?\d+\.?\d*$/.test(q)) {
-          const [lat, lng] = q.split(",").map(Number);
-          const z = parseInt(u.searchParams.get("z") || "15", 10);
-          return { lat, lng, zoom: z };
-        }
-      } catch (e) { /* ignore */ }
-      return null;
-    }
-
-    async function fetchStatic(lng, lat, zoom, width, height, style, density) {
-      // Validación simple de límites razonables
-      width = Math.min(Math.max(256, width|0), 8192);
-      height = Math.min(Math.max(256, height|0), 8192);
-      zoom = Math.min(Math.max(1, zoom|0), 22);
-
-      const safeStyle = style.replace(/[^a-z0-9_-]/gi, "");
-      const d = density === "@2x" ? "@2x" : "";
-      const url = `https://api.maptiler.com/maps/${safeStyle}/static/${lng},${lat},${zoom}/${width}x${height}${d}.png?key=${MAPTILER_KEY}`;
-
-      setStatus("Descargando imagen...");
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("Error al descargar la imagen. Revisá la API key o parámetros.");
-      const blob = await res.blob();
-      setStatus(`Listo. Tamaño descargado: ${Math.round(blob.size/1024)} KB`);
-      return { blob, url };
-    }
-
-    function downloadBlob(blob, filename) {
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        URL.revokeObjectURL(a.href);
-        a.remove();
-      }, 500);
-    }
-
-    async function showOnThree(imageUrl) {
-      return new Promise((resolve, reject) => {
-        const loader = new THREE.TextureLoader();
-        loader.setCrossOrigin("anonymous");
-        loader.load(imageUrl, (tex) => {
-          tex.colorSpace = THREE.SRGBColorSpace;
-          const aspect = tex.image.width / tex.image.height;
-          const geom = new THREE.PlaneGeometry(aspect * 2, 2);
-          const mat = new THREE.MeshBasicMaterial({ map: tex });
-          if (plane) {
-            scene.remove(plane);
-            plane.geometry.dispose();
-            plane.material.map.dispose();
-            plane.material.dispose();
-          }
-          plane = new THREE.Mesh(geom, mat);
-          scene.add(plane);
-          resolve();
-        }, undefined, reject);
-      });
-    }
-
-    ui.go.addEventListener("click", async () => {
-      try {
-        setStatus("Leyendo link...");
-        const parsed = parseGoogleMapsUrl(ui.url.value);
-        if (!parsed) {
-          setStatus("No pude leer lat, lng, zoom del link. Abrí Google Maps y copiá un link con @lat,lng,zoomz");
-          return;
-        }
-        const { lat, lng, zoom } = parsed;
-        const width = parseInt(ui.w.value, 10);
-        const height = parseInt(ui.h.value, 10);
-        const style = ui.style.value;
-        const density = ui.density.value;
-
-        const { blob } = await fetchStatic(lng, lat, zoom, width, height, style, density);
-        const objectUrl = URL.createObjectURL(blob);
-
-        await showOnThree(objectUrl);
-
-        // Nombre de archivo
-        const fname = `map_${style}_${lat.toFixed(5)}_${lng.toFixed(5)}_z${zoom}_${width}x${height}${density || ""}.png`;
-        downloadBlob(blob, fname);
-      } catch (err) {
-        console.error(err);
-        setStatus(err.message || "Error inesperado");
+      const q = u.searchParams.get("q");
+      if (q && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(q)) {
+        const [lat,lng] = q.split(",").map(Number);
+        const z = parseInt(u.searchParams.get("z") || "15", 10);
+        return { lat, lng, z };
       }
-    });
+    } catch(e) {}
+    return null;
+  }
 
-    // Resize canvas al cargar
-    function resizeCanvas() {
-      const uiHeight = document.querySelector(".ui").getBoundingClientRect().height;
-      canvas.style.height = `calc(100vh - ${Math.ceil(uiHeight)}px)`;
-      canvas.style.width = `100vw`;
-      fitRenderer();
+  async function getStaticPNG({lng, lat, z, width, height, style, density}) {
+    width = Math.min(Math.max(256, width|0), 8192);
+    height = Math.min(Math.max(256, height|0), 8192);
+    z = Math.min(Math.max(1, z|0), 22);
+    const d = density === "@2x" ? "@2x" : "";
+    const url = `https://api.maptiler.com/maps/${style}/static/${lng},${lat},${z}/${width}x${height}${d}.png?key=${MAPTILER_KEY}`;
+
+    setMsg("Descargando imagen...");
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) {
+      const txt = await res.text().catch(()=> "");
+      throw new Error(`HTTP ${res.status}. Revisá la API key, el estilo o las restricciones de dominio. ${txt.slice(0,120)}`);
     }
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
-  </script>
+    const blob = await res.blob();
+    return { blob, url };
+  }
+
+  function downloadBlob(blob, filename) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+
+  ui.btn.addEventListener("click", async () => {
+    try {
+      setMsg("Leyendo link...");
+      const p = parseGoogleMapsUrl(ui.url.value);
+      if (!p) { setMsg("No pude leer lat, lng, zoom. Copiá un link con @lat,lng,zoomz"); return; }
+
+      const width = parseInt(ui.w.value, 10);
+      const height = parseInt(ui.h.value, 10);
+      const style = ui.style.value;
+      const density = ui.density.value;
+
+      const { blob } = await getStaticPNG({ lng:p.lng, lat:p.lat, z:p.z, width, height, style, density });
+
+      // Previsualización
+      const objUrl = URL.createObjectURL(blob);
+      ui.preview.src = objUrl;
+      ui.preview.style.display = "block";
+
+      // Nombre de archivo
+      const fname = `map_${style}_${p.lat.toFixed(5)}_${p.lng.toFixed(5)}_z${p.z}_${width}x${height}${density || ""}.png`;
+      downloadBlob(blob, fname);
+
+      setMsg(`Listo. Descargado como ${fname}`);
+    } catch (err) {
+      console.error(err);
+      setMsg(err.message || "Error al descargar");
+    }
+  });
+
+  // Sugerencia de prueba
+  ui.url.value = "https://www.google.com/maps/@-34.6037,-58.3816,14z";
+</script>
 </body>
 </html>
-
