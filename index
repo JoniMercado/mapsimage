@@ -19,7 +19,7 @@
 </head>
 <body>
   <div class="ui">
-    <input id="gmapsUrl" type="text" placeholder="Pegá aquí tu link de Google Maps con coordenadas" />
+    <input id="gmapsUrl" type="text" placeholder="https://www.google.com/maps/@40.5781155,0.682114,183369m/data=!3m1!1e3?entry=ttu&g_ep=EgoyMDI1MDkxNy4wIKXMDSoASAFQAw%3D%3D" />
     <input id="widthPx" type="number" min="256" max="8192" step="1" value="2048" title="Ancho en píxeles" />
     <input id="heightPx" type="number" min="256" max="8192" step="1" value="2048" title="Alto en píxeles" />
     <select id="styleSel" title="Estilo de mapa">
