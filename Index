@@ -1,1 +1,215 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Descargar mapa en alta resolución desde link de Google Maps</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:#0b0c10; color:#e6e6e6; }
+    .ui { padding: 16px; display: grid; gap: 8px; grid-template-columns: 1fr 120px 120px 160px 140px 140px; align-items: center; }
+    .ui input, .ui select, .ui button { padding: 10px; border-radius: 10px; border: 1px solid #333; background:#15171c; color:#e6e6e6; }
+    .ui button { cursor: pointer; border: 1px solid #3a87ff; }
+    #status { grid-column: 1 / -1; opacity:.8; }
+    #viewer { width: 100vw; height: calc(100vh - 120px); display:block; }
+    .note { font-size: 12px; opacity:.75 }
+    @media (max-width: 980px) {
+      .ui { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="ui">
+    <input id="gmapsUrl" type="text" placeholder="Pegá aquí tu link de Google Maps con coordenadas" />
+    <input id="widthPx" type="number" min="256" max="8192" step="1" value="2048" title="Ancho en píxeles" />
+    <input id="heightPx" type="number" min="256" max="8192" step="1" value="2048" title="Alto en píxeles" />
+    <select id="styleSel" title="Estilo de mapa">
+      <option value="satellite">satellite</option>
+      <option value="hybrid">hybrid</option>
+      <option value="streets">streets</option>
+      <option value="toner">toner</option>
+    </select>
+    <select id="densitySel" title="Densidad de píxel">
+      <option value="@2x">@2x (alta)</option>
+      <option value="">@1x</option>
+    </select>
+    <button id="goBtn">Obtener imagen</button>
+    <div id="status" class="note">Pega un link del tipo: https://www.google.com/maps/@-34.607, -58.381, 14z</div>
+  </div>
+
+  <canvas id="viewer"></canvas>
+
+  <!-- Three.js desde CDN -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <script>
+    const MAPTILER_KEY = "XlUzB32whUO2ed7bHx3a"; // reemplaza con tu key
+    // MapTiler Static: https://api.maptiler.com/maps/{style}/static/{lon},{lat},{zoom}/{width}x{height}@2x.png?key=KEY
+
+    const ui = {
+      url: document.getElementById("gmapsUrl"),
+      w: document.getElementById("widthPx"),
+      h: document.getElementById("heightPx"),
+      style: document.getElementById("styleSel"),
+      density: document.getElementById("densitySel"),
+      go: document.getElementById("goBtn"),
+      status: document.getElementById("status")
+    };
+
+    // Three.js setup
+    const canvas = document.getElementById("viewer");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0c10);
+    const camera = new THREE.PerspectiveCamera(45, 2, 0.1, 1000);
+    camera.position.set(0, 0, 3);
+    const light = new THREE.AmbientLight(0xffffff, 1.0);
+    scene.add(light);
+
+    let plane = null;
+
+    function fitRenderer() {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (canvas.width !== w || canvas.height !== h) {
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+    }
+
+    function animate() {
+      fitRenderer();
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    animate();
+
+    function setStatus(msg) {
+      ui.status.textContent = msg;
+    }
+
+    // Parse de URL de Google Maps:
+    // Soporta: https://www.google.com/maps/@lat,lng,zoomz
+    // y links con "ll=lat,lng" o "q=lat,lng"
+    function parseGoogleMapsUrl(url) {
+      try {
+        const u = new URL(url.trim());
+        // 1) patrón @lat,lng,zoomz
+        const at = u.pathname.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*),(\d+\.?\d*)z/);
+        if (at) {
+          const lat = parseFloat(at[1]);
+          const lng = parseFloat(at[2]);
+          const zoom = parseFloat(at[3]);
+          return { lat, lng, zoom: Math.round(zoom) };
+        }
+        // 2) parámetros ll=lat,lng
+        const ll = u.searchParams.get("ll");
+        if (ll) {
+          const [lat, lng] = ll.split(",").map(Number);
+          const z = parseInt(u.searchParams.get("z") || "15", 10);
+          return { lat, lng, zoom: z };
+        }
+        // 3) q=lat,lng
+        const q = u.searchParams.get("q");
+        if (q && /^-?\d+\.?\d*,-?\d+\.?\d*$/.test(q)) {
+          const [lat, lng] = q.split(",").map(Number);
+          const z = parseInt(u.searchParams.get("z") || "15", 10);
+          return { lat, lng, zoom: z };
+        }
+      } catch (e) { /* ignore */ }
+      return null;
+    }
+
+    async function fetchStatic(lng, lat, zoom, width, height, style, density) {
+      // Validación simple de límites razonables
+      width = Math.min(Math.max(256, width|0), 8192);
+      height = Math.min(Math.max(256, height|0), 8192);
+      zoom = Math.min(Math.max(1, zoom|0), 22);
+
+      const safeStyle = style.replace(/[^a-z0-9_-]/gi, "");
+      const d = density === "@2x" ? "@2x" : "";
+      const url = `https://api.maptiler.com/maps/${safeStyle}/static/${lng},${lat},${zoom}/${width}x${height}${d}.png?key=${MAPTILER_KEY}`;
+
+      setStatus("Descargando imagen...");
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Error al descargar la imagen. Revisá la API key o parámetros.");
+      const blob = await res.blob();
+      setStatus(`Listo. Tamaño descargado: ${Math.round(blob.size/1024)} KB`);
+      return { blob, url };
+    }
+
+    function downloadBlob(blob, filename) {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(a.href);
+        a.remove();
+      }, 500);
+    }
+
+    async function showOnThree(imageUrl) {
+      return new Promise((resolve, reject) => {
+        const loader = new THREE.TextureLoader();
+        loader.setCrossOrigin("anonymous");
+        loader.load(imageUrl, (tex) => {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          const aspect = tex.image.width / tex.image.height;
+          const geom = new THREE.PlaneGeometry(aspect * 2, 2);
+          const mat = new THREE.MeshBasicMaterial({ map: tex });
+          if (plane) {
+            scene.remove(plane);
+            plane.geometry.dispose();
+            plane.material.map.dispose();
+            plane.material.dispose();
+          }
+          plane = new THREE.Mesh(geom, mat);
+          scene.add(plane);
+          resolve();
+        }, undefined, reject);
+      });
+    }
+
+    ui.go.addEventListener("click", async () => {
+      try {
+        setStatus("Leyendo link...");
+        const parsed = parseGoogleMapsUrl(ui.url.value);
+        if (!parsed) {
+          setStatus("No pude leer lat, lng, zoom del link. Abrí Google Maps y copiá un link con @lat,lng,zoomz");
+          return;
+        }
+        const { lat, lng, zoom } = parsed;
+        const width = parseInt(ui.w.value, 10);
+        const height = parseInt(ui.h.value, 10);
+        const style = ui.style.value;
+        const density = ui.density.value;
+
+        const { blob } = await fetchStatic(lng, lat, zoom, width, height, style, density);
+        const objectUrl = URL.createObjectURL(blob);
+
+        await showOnThree(objectUrl);
+
+        // Nombre de archivo
+        const fname = `map_${style}_${lat.toFixed(5)}_${lng.toFixed(5)}_z${zoom}_${width}x${height}${density || ""}.png`;
+        downloadBlob(blob, fname);
+      } catch (err) {
+        console.error(err);
+        setStatus(err.message || "Error inesperado");
+      }
+    });
+
+    // Resize canvas al cargar
+    function resizeCanvas() {
+      const uiHeight = document.querySelector(".ui").getBoundingClientRect().height;
+      canvas.style.height = `calc(100vh - ${Math.ceil(uiHeight)}px)`;
+      canvas.style.width = `100vw`;
+      fitRenderer();
+    }
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+  </script>
+</body>
+</html>
 
